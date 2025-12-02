@@ -1,9 +1,12 @@
 from fastapi import FastAPI, Depends, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from fastapi.responses import RedirectResponse
 from sqlalchemy.orm import Session
 from typing import List
 from contextlib import asynccontextmanager
+from app.config import settings
+import requests
 import time
 import threading
 from .database import get_db, init_db
@@ -71,6 +74,8 @@ def register(user: UserCreate, db: Session = Depends(get_db)):
 def login(user: UserLogin, db: Session = Depends(get_db)):
     try:
         db_user = db.query(User).filter(User.username == user.username).first()
+        if db_user and db_user.password is None:
+            raise HTTPException(status_code=400, detail="User registered via OAuth")
         if not db_user or not verify_password(user.password, db_user.password):
             raise HTTPException(status_code=401, detail="Invalid credentials")
         token = create_token({"user_id": db_user.id, "username": db_user.username, "role": db_user.role})
@@ -79,7 +84,39 @@ def login(user: UserLogin, db: Session = Depends(get_db)):
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error during login: {str(e)}")
+    
+GOOGLE_AUTH_URL = f"https://accounts.google.com/o/oauth2/v2/auth?client_id={settings.GOOGLE_CLIENT_ID}&redirect_uri={settings.GOOGLE_REDIRECT_URI}&response_type=code&scope=email%20profile"
 
+@app.get("/api/auth/google")
+def google_login():
+    return RedirectResponse(url=GOOGLE_AUTH_URL)
+
+@app.get("/api/auth/google/callback")
+def google_callback(code: str, db: Session = Depends(get_db)):
+    token_res = requests.post("https://oauth2.googleapis.com/token", 
+                              data={
+                                "code": code,
+                                "client_id": settings.GOOGLE_CLIENT_ID,
+                                "client_secret": settings.GOOGLE_CLIENT_SECRET,
+                                "redirect_uri": settings.GOOGLE_REDIRECT_URI,
+                                "grant_type": "authorization_code"
+                                }).json()
+
+    access_token = token_res.get("access_token")
+    if not access_token:
+        raise HTTPException(status_code=400, detail="Google auth failed")
+    
+    user_info = requests.get("https://www.googleapis.com/oauth2/v3/userinfo", headers={"Authorization": f"Bearer {access_token}"}).json()
+    email = user_info["email"]
+    db_user = db.query(User).filter(User.username == email).first()
+    if not db_user:
+        db_user = User(username=email, password=None, email=email, role="user")
+        db.add(db_user)
+        db.commit()
+        db.refresh(db_user)
+    token = create_token({"user_id": db_user.id, "username": db_user.username, "role": db_user.role})
+    return RedirectResponse(f"http://localhost:3000?token={token}&username={db_user.username}&role={db_user.role}")
+    
 # CHAT
 @app.post("/api/v1/chat", response_model=ChatResponse)
 def chat(req: ChatRequest, current_user: dict = Depends(get_current_user), db: Session = Depends(get_db)):

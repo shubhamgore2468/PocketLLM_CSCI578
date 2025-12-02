@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import ChatPage from "./ChatPage";
 import HistoryPage from "./HistoryPage";
 import AdminPage from "./AdminPage";
@@ -14,6 +14,20 @@ function App() {
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [isLogin, setIsLogin] = useState(true);
+
+  useEffect(() => {
+    const urlParams = new URLSearchParams(window.location.search);
+    const urlToken = urlParams.get("token");
+    const urlUsername = urlParams.get("username");
+    const urlRole = urlParams.get("role");
+    if(urlToken && urlUsername && urlRole) {
+      localStorage.setItem("token", urlToken);
+      localStorage.setItem("user", JSON.stringify({ username: urlUsername, role: urlRole }));
+      setToken(urlToken);
+      setUser({ username: urlUsername, role: urlRole });
+      window.history.replaceState({}, document.title, "/");
+    }
+  }, []);
 
   const handleAuth = async (e) => {
     e.preventDefault();
@@ -43,6 +57,10 @@ function App() {
       alert("Network error: " + err.message);
     }
   };
+
+  const handleAuthGoogle = () => {
+    window.location.href = "http://localhost:8000/api/auth/google";
+  }
 
   const logout = () => {
     localStorage.removeItem("token");
@@ -113,6 +131,13 @@ function App() {
               ? "Don't have an account? Sign up"
               : "Already have an account? Sign in"}
           </button>
+          <div className="mt-6 pt-6 border-t border-slate-700 text-center">
+            <p className="text-s text-slate-400">Or</p>
+            <button onClick={handleAuthGoogle} className="flex items-center gap-3 w-full mt-4 px-4 py-2 rounded-lg font-medium bg-gray-900 text-white hover:bg-gray-800 border border-gray-700">
+              <img src="/google-logo.svg" alt="Google Logo" className="w-5 h-5 invert"/>
+              <span>Continue With Google</span>
+            </button>
+          </div>
           <div className="mt-6 pt-6 border-t border-slate-700 text-center">
             <p className="text-xs text-slate-400 mb-2">
               Default admin credentials:
